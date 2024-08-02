@@ -12,4 +12,4 @@ add_subdirectory(external/minhook)
 add_executable(${PROJECT_NAME} src/server.cpp)
 
 add_library(shim SHARED src/shim.cpp)
-target_link_libraries(shim minhook)
+target_link_libraries(shim minhook opengl32)
