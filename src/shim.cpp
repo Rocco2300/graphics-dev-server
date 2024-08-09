@@ -19,6 +19,7 @@ static bool saved{};
 static DWORD error{};
 static void* buffer{};
 static HANDLE event{};
+static HANDLE mutex{};
 static HANDLE mapFile{};
 static std::chrono::time_point<std::chrono::system_clock, std::chrono::duration<double>> start;
 
@@ -29,37 +30,17 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
         glGetIntegerv(GL_VIEWPORT, viewport);
         int width  = viewport[2];
         int height = viewport[3];
-        //std::vector<uint8_t> pixels(3 * width * height);
-        glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, buffer);
 
         auto now  = std::chrono::high_resolution_clock::now();
         auto time = std::chrono::duration_cast<std::chrono::seconds>(now - start);
-        if (!saved && time.count() >= 5.0) {
-            //std::stringstream data;
 
-            auto s = std::chrono::high_resolution_clock::now();
-            //for (int i = 0; i < height; i++) {
-            //    for (int j = 0; j < width; j++) {
-            //        int index      = (i * width + j) * 3;
-            //        uint8_t* pixel = &pixels[index];
-            //        data << pixel[0] << pixel[1] << pixel[2];
-            //    }
-            //}
-
-            //const size_t bufferSize = 1024 * 1024 * 12;
-
-            //auto dataString  = data.str();
-            //char* dataBuffer = dataString.data();
-            //size_t length    = dataString.length();
-            //memcpy(buffer, &length, sizeof(length));
-            //memcpy((char*) buffer + 8, dataBuffer, dataString.length());
-            SetEvent(event);
-
-            auto e = std::chrono::high_resolution_clock::now();
-
-            std::cerr << std::chrono::duration_cast<std::chrono::milliseconds>(e - s).count()
-                      << '\n';
-            saved = true;
+        if (time.count() >= 5.0f) {
+            auto wait = WaitForSingleObject(mutex, INFINITE);
+            if (wait == WAIT_OBJECT_0) {
+                glReadPixels(0, 0, width, height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, buffer);
+                ReleaseMutex(mutex);
+                SetEvent(event);
+            }
         }
     } else {
         MessageBoxA(nullptr, "Could not load context\n", "Message", MB_OK);
@@ -70,7 +51,6 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
-        MessageBox(nullptr, "Message", "Message", MB_OK);
         start = std::chrono::high_resolution_clock::now();
 
         mapFile = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, "Local\\VideoFrame");
@@ -84,6 +64,12 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
         event = OpenEvent(EVENT_MODIFY_STATE, FALSE, "Local\\VideoFrameReady");
         if (!event) {
             std::cerr << "Error opening frame ready event\n";
+            return 1;
+        }
+
+        mutex = OpenMutex(MUTEX_ALL_ACCESS, FALSE, "Local\\VideoFrameMutex");
+        if (!mutex) {
+            std::cerr << "Error opening video stream mutex\n";
             return 1;
         }
 
