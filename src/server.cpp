@@ -1,14 +1,9 @@
 #include <chrono>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 #include <windows.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
 
 extern "C" {
@@ -120,19 +115,18 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
         return 1;
     }
 
-    context->bit_rate      = 400000;
     context->width         = 1280;
     context->height        = 720;
     context->time_base.num = 1;
-    context->time_base.den = 30;
-    context->framerate.num = 30;
+    context->time_base.den = 60;
+    context->framerate.num = 60;
     context->framerate.den = 1;
     context->pix_fmt       = AV_PIX_FMT_YUV420P;
     context->gop_size      = 10;
-    context->max_b_frames  = 1;
+    context->max_b_frames  = 0;
 
     av_opt_set(context->priv_data, "preset", "ultrafast", 0);
-    av_opt_set(context->priv_data, "crf", "35", 0);
+    av_opt_set(context->priv_data, "crf", "25", 0);
     av_opt_set(context->priv_data, "tune", "zerolatency", 0);
 
     auto desc = av_pix_fmt_desc_get(AV_PIX_FMT_BGRA);
@@ -149,7 +143,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
 
     auto swsContext = sws_getContext(1280,
                                      720,
-                                     AV_PIX_FMT_RGB24,
+                                     AV_PIX_FMT_BGRA,
                                      1280,
                                      720,
                                      AV_PIX_FMT_YUV420P,
@@ -177,35 +171,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
         return 1;
     }
 
-    const AVOutputFormat* fmt = av_guess_format(nullptr, "test.mp4", nullptr);
-    AVFormatContext* formatContext;
-    avformat_alloc_output_context2(&formatContext, nullptr, nullptr, "test.mp4");
-    if (!formatContext) {
-        std::cerr << "Could not allocate output context\n";
-        return 1;
-    }
-    formatContext->oformat     = fmt;
-    formatContext->video_codec = codec;
-
-    AVStream* stream = avformat_new_stream(formatContext, nullptr);
-    if (!stream) {
-        std::cerr << "Could not create a output stream\n";
-        return 1;
-    }
-    avcodec_parameters_from_context(stream->codecpar, context);
-    stream->time_base = (AVRational){1, 30};
-
-    av_dump_format(formatContext, 0, "test.mp4", 1);
-
-    avio_open(&formatContext->pb, "test.mp4", AVIO_FLAG_WRITE);
-
-    auto ret = avformat_write_header(formatContext, nullptr);
-    if (ret < 0) {
-        std::cerr << "Error opening output file\n";
-        return 1;
-    }
-
-    FILE* out = fopen("test_data", "w");
+    FILE* out = fopen("test_data", "wb");
     while (true) {
         auto eventWait = WaitForSingleObject(event, INFINITE);
         auto mutexWait = WaitForSingleObject(mutex, INFINITE);
@@ -233,25 +199,42 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
 
             switch (avcodec_send_frame(context, frame)) {
             case 0:
-                frameNumber = (frameNumber % context->framerate.num) + 1;
+                frameNumber++;
+                frameNumber %= context->framerate.num;
+                break;
+            case AVERROR(EAGAIN):
+                std::cerr << "Read some first\n";
+                break;
+            case AVERROR_EOF:
+                std::cerr << "I am flushing\n";
+                break;
+            case AVERROR(EINVAL):
+                std::cerr << "Codec somehow not found\n";
+                break;
+            case AVERROR(ENOMEM):
+                std::cerr << "Failed to add packet to queue\n";
                 break;
             default:
-                std::cerr << "Something went wrong\n";
+                std::cerr << "Something went wrong when sending\n";
                 break;
             }
 
             switch (avcodec_receive_packet(context, packet)) {
             case 0:
-                //packet->stream_index = stream->index;
-                //av_packet_rescale_ts(packet, context->time_base, stream->time_base);
-
-                //av_interleaved_write_frame(formatContext, packet);
-
                 fwrite(packet->data, 1, packet->size, out);
                 av_packet_unref(packet);
                 break;
+            case AVERROR(EAGAIN):
+                std::cerr << "Send some first\n";
+                break;
+            case AVERROR_EOF:
+                std::cerr << "I am flushing\n";
+                break;
+            case AVERROR(EINVAL):
+                std::cerr << "Codec somehow not found\n";
+                break;
             default:
-                std::cerr << "Something went wrong\n";
+                std::cerr << "Something went wrong when receiving\n";
                 break;
             }
 

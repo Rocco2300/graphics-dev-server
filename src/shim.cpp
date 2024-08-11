@@ -4,12 +4,8 @@
 #include <windows.h>
 
 #include <chrono>
-#include <cinttypes>
-#include <cstring>
-#include <fstream>
 #include <iostream>
-#include <sstream>
-#include <vector>
+#include <thread>
 
 typedef BOOL(WINAPI* SwapBuffersType)(HDC hdc);
 
@@ -21,9 +17,14 @@ static void* buffer{};
 static HANDLE event{};
 static HANDLE mutex{};
 static HANDLE mapFile{};
-static std::chrono::time_point<std::chrono::system_clock, std::chrono::duration<double>> start;
+static std::chrono::time_point<std::chrono::steady_clock, std::chrono::duration<double>> start;
+static std::chrono::time_point<std::chrono::steady_clock, std::chrono::duration<double>> frameEnd;
+static std::chrono::time_point<std::chrono::steady_clock, std::chrono::duration<double>> currTime;
 
 BOOL WINAPI DetourSwapBuffers(HDC hdc) {
+    using clock = std::chrono::steady_clock;
+    using frames = std::chrono::duration<int, std::ratio<1, 60>>;
+
     HGLRC context = wglGetCurrentContext();
     if (context) {
         int viewport[4];
@@ -31,13 +32,24 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
         int width  = viewport[2];
         int height = viewport[3];
 
-        auto now  = std::chrono::high_resolution_clock::now();
+        auto now  = std::chrono::steady_clock::now();
         auto time = std::chrono::duration_cast<std::chrono::seconds>(now - start);
 
-        if (time.count() >= 5.0f) {
+        if (time.count() > 5) {
             auto wait = WaitForSingleObject(mutex, INFINITE);
             if (wait == WAIT_OBJECT_0) {
                 glReadPixels(0, 0, width, height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, buffer);
+
+                currTime = clock::now();
+                while (currTime - frameEnd < frames(1)) {
+                    currTime = clock::now();
+                }
+                //if (currTime - frameEnd < frames(1)) {
+                //    auto dt = std::chrono::duration<double, std::milli>(currTime - frameEnd);
+                //    std::cout << dt.count() << '\n';
+                //    //std::this_thread::sleep_until(currTime + frames(1));
+                //}
+
                 ReleaseMutex(mutex);
                 SetEvent(event);
             }
@@ -45,13 +57,15 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
     } else {
         MessageBoxA(nullptr, "Could not load context\n", "Message", MB_OK);
     }
+
+    frameEnd = clock::now();
     return OriginalSwapBuffers(hdc);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
 
         mapFile = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, "Local\\VideoFrame");
         if (!mapFile) {
