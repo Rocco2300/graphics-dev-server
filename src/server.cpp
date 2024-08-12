@@ -177,8 +177,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
         auto mutexWait = WaitForSingleObject(mutex, INFINITE);
 
         if (eventWait == WAIT_OBJECT_0 && mutexWait == WAIT_OBJECT_0) {
-            //auto s = std::chrono::high_resolution_clock::now();
-
+            int ret;
             fflush(stdout);
 
             auto* data               = (uint8_t*) buffer;
@@ -197,50 +196,27 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
                       frame->linesize);
             frame->pts = frameNumber;
 
-            switch (avcodec_send_frame(context, frame)) {
-            case 0:
-                frameNumber++;
-                frameNumber %= context->framerate.num;
-                break;
-            case AVERROR(EAGAIN):
-                std::cerr << "Read some first\n";
-                break;
-            case AVERROR_EOF:
-                std::cerr << "I am flushing\n";
-                break;
-            case AVERROR(EINVAL):
-                std::cerr << "Codec somehow not found\n";
-                break;
-            case AVERROR(ENOMEM):
-                std::cerr << "Failed to add packet to queue\n";
-                break;
-            default:
-                std::cerr << "Something went wrong when sending\n";
-                break;
+            ret = avcodec_send_frame(context, frame);
+            if (ret < 0) {
+                std::cerr << "Something went wrong when sending frame to encoder\n";
+                return 1;
             }
+            frameNumber++;
+            frameNumber %= context->framerate.num;
+            frameNumber = (frameNumber + 1) % context->framerate.num;
 
-            switch (avcodec_receive_packet(context, packet)) {
-            case 0:
+            while (ret >= 0) {
+                ret = avcodec_receive_packet(context, packet);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+                    break;
+                } else if (ret < 0) {
+                    std::cerr << "Something went wrong when receiving packet from encoder\n";
+                    return 1;
+                }
+
                 fwrite(packet->data, 1, packet->size, out);
                 av_packet_unref(packet);
-                break;
-            case AVERROR(EAGAIN):
-                std::cerr << "Send some first\n";
-                break;
-            case AVERROR_EOF:
-                std::cerr << "I am flushing\n";
-                break;
-            case AVERROR(EINVAL):
-                std::cerr << "Codec somehow not found\n";
-                break;
-            default:
-                std::cerr << "Something went wrong when receiving\n";
-                break;
             }
-
-            //auto e    = std::chrono::high_resolution_clock::now();
-            //auto time = std::chrono::duration_cast<std::chrono::milliseconds>(e - s);
-            //std::cout << time.count() << '\n';
 
             ReleaseMutex(mutex);
             ResetEvent(event);

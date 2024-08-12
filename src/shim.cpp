@@ -11,11 +11,11 @@ typedef BOOL(WINAPI* SwapBuffersType)(HDC hdc);
 
 SwapBuffersType OriginalSwapBuffers = nullptr;
 
-static bool saved{};
-static DWORD error{};
+static bool started{};
 static void* buffer{};
 static HANDLE event{};
 static HANDLE mutex{};
+static bool recorded = true;
 static HANDLE mapFile{};
 static std::chrono::time_point<std::chrono::steady_clock, std::chrono::duration<double>> start;
 static std::chrono::time_point<std::chrono::steady_clock, std::chrono::duration<double>> frameEnd;
@@ -35,20 +35,17 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
         auto now  = std::chrono::steady_clock::now();
         auto time = std::chrono::duration_cast<std::chrono::seconds>(now - start);
 
-        if (time.count() > 5) {
+        if (time.count() > 5 && !started) {
+            started = true;
+            std::cout << "Recording started!\n";
+        }
+
+        currTime = clock::now();
+        if (time.count() > 5 && currTime - frameEnd >= frames(1)) {
             auto wait = WaitForSingleObject(mutex, INFINITE);
             if (wait == WAIT_OBJECT_0) {
+                recorded = true;
                 glReadPixels(0, 0, width, height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, buffer);
-
-                currTime = clock::now();
-                while (currTime - frameEnd < frames(1)) {
-                    currTime = clock::now();
-                }
-                //if (currTime - frameEnd < frames(1)) {
-                //    auto dt = std::chrono::duration<double, std::milli>(currTime - frameEnd);
-                //    std::cout << dt.count() << '\n';
-                //    //std::this_thread::sleep_until(currTime + frames(1));
-                //}
 
                 ReleaseMutex(mutex);
                 SetEvent(event);
@@ -58,7 +55,10 @@ BOOL WINAPI DetourSwapBuffers(HDC hdc) {
         MessageBoxA(nullptr, "Could not load context\n", "Message", MB_OK);
     }
 
-    frameEnd = clock::now();
+    if (recorded) {
+        recorded = false;
+        frameEnd = clock::now();
+    }
     return OriginalSwapBuffers(hdc);
 }
 
