@@ -1,18 +1,21 @@
-#include <chrono>
 #include <iostream>
 #include <string>
 
-#include <windows.h>
+#include <boost/asio.hpp>
 
-#include <stb_image_write.h>
+#include <windows.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/error.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 };
+
+namespace asio = boost::asio;
+using asio::ip::udp;
 
 static int frameNumber{};
 
@@ -115,6 +118,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
         return 1;
     }
 
+    context->bit_rate      = 400000;
     context->width         = 1280;
     context->height        = 720;
     context->time_base.num = 1;
@@ -122,7 +126,7 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
     context->framerate.num = 60;
     context->framerate.den = 1;
     context->pix_fmt       = AV_PIX_FMT_YUV420P;
-    context->gop_size      = 10;
+    context->gop_size      = 2 * 60;
     context->max_b_frames  = 0;
 
     av_opt_set(context->priv_data, "preset", "ultrafast", 0);
@@ -171,7 +175,44 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
         return 1;
     }
 
-    FILE* out = fopen("test_data", "wb");
+    AVFormatContext* formatContext;
+    const AVOutputFormat* fmt = av_guess_format("rtp", nullptr, nullptr);
+    if (!fmt) {
+        std::cerr << "The rtp format was not found\n";
+        return 1;
+    }
+
+    if (avformat_alloc_output_context2(&formatContext, fmt, fmt->name, "rtp://127.0.0.1:8000")) {
+        std::cerr << "Could not allocate output context for rtp stream\n";
+        return 1;
+    }
+
+    if (avio_open(&formatContext->pb, formatContext->url, AVIO_FLAG_WRITE)) {
+        std::cerr << "Could not open rtp stream\n";
+        return 1;
+    }
+
+    AVStream* stream             = avformat_new_stream(formatContext, codec);
+    //stream->codecpar->bit_rate   = 400000;
+    //stream->codecpar->width      = 1280;
+    //stream->codecpar->height     = 720;
+    //stream->codecpar->codec_id   = AV_CODEC_ID_H264;
+    //stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    //stream->time_base.num        = 1;
+    //stream->time_base.den        = 60;
+
+    avcodec_parameters_from_context(stream->codecpar, context);
+
+    char buf[20000];
+    AVFormatContext* ac[] = {formatContext};
+    av_sdp_create(ac, 1, buf, 20000);
+
+    FILE* out = fopen("test.sdp", "w");
+    fprintf(out, "%s", buf);
+    fclose(out);
+
+    //FILE* debugOut = fopen("test.h264", "wb");
+    //debugOut       = fopen("test.h264", "wb");
     while (true) {
         auto eventWait = WaitForSingleObject(event, INFINITE);
         auto mutexWait = WaitForSingleObject(mutex, INFINITE);
@@ -201,9 +242,8 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
                 std::cerr << "Something went wrong when sending frame to encoder\n";
                 return 1;
             }
+            //frameNumber = (frameNumber + 1) % context->framerate.num;
             frameNumber++;
-            frameNumber %= context->framerate.num;
-            frameNumber = (frameNumber + 1) % context->framerate.num;
 
             while (ret >= 0) {
                 ret = avcodec_receive_packet(context, packet);
@@ -214,7 +254,24 @@ int APIENTRY WinMain(HINSTANCE inst, HINSTANCE prevInst, PSTR cmdline, int cmdsh
                     return 1;
                 }
 
-                fwrite(packet->data, 1, packet->size, out);
+                auto ret_val = avformat_write_header(formatContext, nullptr);
+                int64_t frameTime{};
+                int64_t frameDuration{};
+
+                frameDuration    = stream->time_base.den / 60;
+                frameTime        = frameNumber * frameDuration;
+                packet->pts      = frameTime / stream->time_base.num;
+                packet->duration = frameDuration;
+
+                packet->dts          = packet->pts;
+                packet->stream_index = stream->index;
+
+                //std::cout << packet->pts << ' ' << packet->dts << '\n';
+                //fwrite(packet->data, packet->size, 1, debugOut);
+
+                //packet->pts = av_rescale_q(packet->pts, context->time_base, stream->time_base);
+                //packet->dts = av_rescale_q(packet->dts, context->time_base, stream->time_base);
+                av_interleaved_write_frame(formatContext, packet);
                 av_packet_unref(packet);
             }
 
