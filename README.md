@@ -2,9 +2,20 @@
 
 [![test video](test_thumbnail.png)](test.mp4)
 
-This is an application which is meant to fill a gap in my remote workflow. Working remotely through Remote Desktop or Parsec is cumbersome and X11 forwarding through SSH doesn't work on Windows (as far as I found). So, this is my first attempt at forwarding an application from a remote computer to a client. 
+This project was born out of a need to improve my remote development workflow. Traditional solutions like Remote Desktop or Parsec create too much friction, and native X11 forwarding doesn't work on Windows. This repository serves as a proof-of-concept for selectively forwarding a single remote application window to a local client.
 
-The current implementation doesn't include any of the screen casting logic, as I didn't get to it. I managed to record the frames of an OpenGL application by using DLL injection and function hooking, which only makes it useful for OpenGL applications. I later found that windows offers a capture API, as such I will be continuing the project under a different repository using that. At the present time this is just a demo, recording the frames into a .mp4 container using FFmpeg. 
+### Technical approach & Progress
+
+The current iteration focuses on the capture pipeline rather than the networking layer. To capture frame with minimal overhead, I implemented:
+- __DLL injection & Function Hooking__ - to intercept the OpenGL render loop.
+- __Frame Capture__ - extracting raw frame data from the graphics context.
+- __Encoding__ - using FFmpeg to encode and mux captured frames into an `mp4` container.
+
+### Project status
+
+While successful as a specialized OpenGL capture tool, this approach is limited. I have since discovered the native Windows Capture API, which offers a more robust solution for client area window capture.
+
+Active development will be moved in the future to a new repository. This repository remains as a demo of the DLL injection and OpenGL hooking solution.
 
 ## Requirements
 
