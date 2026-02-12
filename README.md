@@ -1,5 +1,4 @@
 # Graphics Development Server
-___
 
 [![test video](test_thumbnail.png)](test.mp4)
 
@@ -8,21 +7,18 @@ This is an application which is meant to fill a gap in my remote workflow. Worki
 The current implementation doesn't include any of the screen casting logic, as I didn't get to it. I managed to record the frames of an OpenGL application by using DLL injection and function hooking, which only makes it useful for OpenGL applications. I later found that windows offers a capture API, as such I will be continuing the project under a different repository using that. At the present time this is just a demo, recording the frames into a .mp4 container using FFmpeg. 
 
 ## Requirements
-___
 
 - CMake 3.30
 - MinGW 13.2.0 MSVCRT (or equivalent)
 - vcpkg
 
 ## Dependencies
-___
 
 - FFmpeg
 - minhook
 - Boost ASIO (not used)
 
 ## Building
-___
 
 ```
 git clone github.com/Rocco2300/graphics-dev-server
